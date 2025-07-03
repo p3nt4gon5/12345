@@ -1,22 +1,33 @@
 import { useState, useEffect } from 'react';
 import Fuse from 'fuse.js';
-import { Pokemon, PokemonListResponse } from '../types/pokemon';
+import { Pokemon } from '../types/pokemon';
+import { DatabaseService, DatabasePokemon } from '../services/databaseService';
 
-const POKEMON_API_BASE = 'https://pokeapi.co/api/v2';
+// Преобразование DatabasePokemon в Pokemon для совместимости
+const convertDatabasePokemonToPokemon = (dbPokemon: DatabasePokemon): Pokemon => ({
+  id: dbPokemon.id,
+  name: dbPokemon.name,
+  url: `https://pokeapi.co/api/v2/pokemon/${dbPokemon.id}/`,
+  height: dbPokemon.height,
+  weight: dbPokemon.weight,
+  types: dbPokemon.types,
+  abilities: dbPokemon.abilities,
+  stats: dbPokemon.stats,
+  sprites: dbPokemon.sprites,
+  species: dbPokemon.species_url ? { url: dbPokemon.species_url } : undefined
+});
 
-// Custom hook to get complete Pokemon list for fuzzy search
+// Хук для получения списка покемонов из базы данных
 export const usePokemonList = () => {
   const [pokemonList, setPokemonList] = useState<string[]>([]);
   
   useEffect(() => {
-    // Fetch all Pokemon names for search functionality
     const fetchPokemonList = async () => {
       try {
-        const response = await fetch(`${POKEMON_API_BASE}/pokemon?limit=1500`);
-        const data: PokemonListResponse = await response.json();
-        setPokemonList(data.results.map(p => p.name));
+        const dbPokemon = await DatabaseService.getAllPokemon();
+        setPokemonList(dbPokemon.map(p => p.name));
       } catch (error) {
-        console.error('Error fetching pokemon list:', error);
+        console.error('Error fetching pokemon list from database:', error);
       }
     };
     
@@ -26,7 +37,7 @@ export const usePokemonList = () => {
   return pokemonList;
 };
 
-// Custom hook to fetch single Pokemon data by name
+// Хук для получения одного покемона из базы данных
 export const usePokemon = (name: string | null) => {
   const [pokemon, setPokemon] = useState<Pokemon | null>(null);
   const [loading, setLoading] = useState(false);
@@ -35,17 +46,19 @@ export const usePokemon = (name: string | null) => {
   useEffect(() => {
     if (!name) return;
     
-    // Fetch detailed Pokemon data from API
     const fetchPokemon = async () => {
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(`${POKEMON_API_BASE}/pokemon/${name.toLowerCase()}`);
-        if (!response.ok) {
-          throw new Error('Pokemon not found');
+        // Сначала пытаемся найти в базе данных
+        const dbPokemon = await DatabaseService.searchPokemonInDatabase(name);
+        const foundPokemon = dbPokemon.find(p => p.name.toLowerCase() === name.toLowerCase());
+        
+        if (foundPokemon) {
+          setPokemon(convertDatabasePokemonToPokemon(foundPokemon));
+        } else {
+          throw new Error('Pokemon not found in database');
         }
-        const data = await response.json();
-        setPokemon(data);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred');
         setPokemon(null);
@@ -60,7 +73,7 @@ export const usePokemon = (name: string | null) => {
   return { pokemon, loading, error };
 };
 
-// Enhanced search hook with fuzzy matching for typo tolerance
+// Хук для поиска покемонов в базе данных с fuzzy matching
 export const useSearchPokemon = (query: string) => {
   const [results, setResults] = useState<Pokemon[]>([]);
   const [loading, setLoading] = useState(false);
@@ -72,43 +85,44 @@ export const useSearchPokemon = (query: string) => {
       return;
     }
     
-    // Implement fuzzy search with typo tolerance
     const searchPokemon = async () => {
       setLoading(true);
       
-      // Configure Fuse.js for fuzzy search with typo tolerance
-      const fuse = new Fuse(pokemonList, {
-        threshold: 0.4, // Allow for typos and partial matches
-        distance: 100,
-        minMatchCharLength: 1,
-        includeScore: true,
-        keys: ['']
-      });
-      
-      // Get fuzzy search results
-      const fuzzyResults = fuse.search(query.toLowerCase());
-      const matchedNames = fuzzyResults
-        .slice(0, 12) // Limit to 12 results for performance
-        .map(result => result.item);
-      
       try {
-        // Fetch detailed data for matched Pokemon
-        const pokemonPromises = matchedNames.map(async (name) => {
-          const response = await fetch(`${POKEMON_API_BASE}/pokemon/${name}`);
-          return response.json();
+        // Fuzzy search по именам из базы данных
+        const fuse = new Fuse(pokemonList, {
+          threshold: 0.4,
+          distance: 100,
+          minMatchCharLength: 1,
+          includeScore: true,
+          keys: ['']
         });
         
-        const pokemonData = await Promise.all(pokemonPromises);
-        setResults(pokemonData);
+        const fuzzyResults = fuse.search(query.toLowerCase());
+        const matchedNames = fuzzyResults
+          .slice(0, 12)
+          .map(result => result.item);
+        
+        if (matchedNames.length > 0) {
+          // Получаем детальную информацию из базы данных
+          const dbPokemon = await DatabaseService.searchPokemonInDatabase(query);
+          const filteredPokemon = dbPokemon.filter(p => 
+            matchedNames.includes(p.name)
+          );
+          
+          const convertedPokemon = filteredPokemon.map(convertDatabasePokemonToPokemon);
+          setResults(convertedPokemon);
+        } else {
+          setResults([]);
+        }
       } catch (error) {
-        console.error('Error searching pokemon:', error);
+        console.error('Error searching pokemon in database:', error);
         setResults([]);
       } finally {
         setLoading(false);
       }
     };
     
-    // Debounce search to avoid too many API calls
     const debounceTimer = setTimeout(searchPokemon, 300);
     return () => clearTimeout(debounceTimer);
   }, [query, pokemonList]);
@@ -116,7 +130,7 @@ export const useSearchPokemon = (query: string) => {
   return { results, loading };
 };
 
-// Hook for search suggestions with fuzzy matching
+// Хук для предложений поиска
 export const useSearchSuggestions = (query: string) => {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const pokemonList = usePokemonList();
@@ -127,9 +141,8 @@ export const useSearchSuggestions = (query: string) => {
       return;
     }
     
-    // Generate search suggestions with fuzzy matching
     const fuse = new Fuse(pokemonList, {
-      threshold: 0.3, // Stricter threshold for suggestions
+      threshold: 0.3,
       distance: 50,
       minMatchCharLength: 1,
       keys: ['']
@@ -137,7 +150,7 @@ export const useSearchSuggestions = (query: string) => {
     
     const fuzzyResults = fuse.search(query.toLowerCase());
     const matchedNames = fuzzyResults
-      .slice(0, 8) // Show top 8 suggestions
+      .slice(0, 8)
       .map(result => result.item);
     
     setSuggestions(matchedNames);

@@ -9,7 +9,8 @@ import {
   ChevronRight,
   TrendingUp,
   Shield,
-  Database
+  Database,
+  Download
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUserStats } from '../hooks/useUserStats';
@@ -19,8 +20,10 @@ import AdminStatsPage from './admin/AdminStatsPage';
 import AdminManagementPage from './admin/AdminManagementPage';
 import AdminAddPokemonPage from './admin/AdminAddPokemonPage';
 import AdminEmptyPage from './admin/AdminEmptyPage';
+import AdminAllPokemonPage from './admin/AdminAllPokemonPage';
+import AdminDatabasePokemonPage from './admin/AdminDatabasePokemonPage';
 
-type AdminView = 'dashboard' | 'users' | 'pokemon' | 'stats' | 'management' | 'add-pokemon' | 'empty';
+type AdminView = 'dashboard' | 'users' | 'pokemon' | 'stats' | 'management' | 'add-pokemon' | 'empty' | 'all-pokemon' | 'database-pokemon';
 
 const AdminPanel: React.FC = () => {
   const { user } = useAuth();
@@ -81,6 +84,10 @@ const AdminPanel: React.FC = () => {
           return <AdminManagementPage onBack={() => setCurrentView('dashboard')} />;
         case 'add-pokemon':
           return <AdminAddPokemonPage onBack={() => setCurrentView('dashboard')} />;
+        case 'all-pokemon':
+          return <AdminAllPokemonPage onBack={() => setCurrentView('dashboard')} />;
+        case 'database-pokemon':
+          return <AdminDatabasePokemonPage onBack={() => setCurrentView('dashboard')} />;
         case 'empty':
           return <AdminEmptyPage onBack={() => setCurrentView('dashboard')} />;
         default:
@@ -107,20 +114,29 @@ const AdminPanel: React.FC = () => {
       onClick: () => setCurrentView('users')
     },
     {
-      id: 'pokemon',
-      title: 'All Pokémon',
-      description: 'Browse all available Pokémon on the site',
+      id: 'all-pokemon',
+      title: 'All Pokémon (API)',
+      description: 'Browse all Pokémon from API and add to database',
+      icon: Download,
+      color: 'from-purple-500 to-purple-600',
+      stats: 'API Integration',
+      onClick: () => setCurrentView('all-pokemon')
+    },
+    {
+      id: 'database-pokemon',
+      title: 'Database Pokémon',
+      description: 'Manage Pokémon stored in your database',
       icon: Database,
       color: 'from-green-500 to-green-600',
-      stats: `${statsLoading ? '...' : libraryCount} in libraries`,
-      onClick: () => setCurrentView('pokemon')
+      stats: 'Database Only',
+      onClick: () => setCurrentView('database-pokemon')
     },
     {
       id: 'stats',
       title: 'Statistics',
       description: 'View detailed analytics and user statistics',
       icon: BarChart3,
-      color: 'from-purple-500 to-purple-600',
+      color: 'from-indigo-500 to-indigo-600',
       stats: `${statsLoading ? '...' : favoritesCount} favorites`,
       onClick: () => setCurrentView('stats')
     },
@@ -135,21 +151,12 @@ const AdminPanel: React.FC = () => {
     },
     {
       id: 'add-pokemon',
-      title: 'Add Pokémon',
-      description: 'Add new Pokémon to the site database',
+      title: 'Add Pokémon (Legacy)',
+      description: 'Legacy Pokemon addition interface',
       icon: Plus,
       color: 'from-yellow-500 to-yellow-600',
-      stats: 'Content management',
+      stats: 'Legacy feature',
       onClick: () => setCurrentView('add-pokemon')
-    },
-    {
-      id: 'empty',
-      title: 'Custom Page',
-      description: 'Navigate to custom admin page',
-      icon: FileText,
-      color: 'from-gray-500 to-gray-600',
-      stats: 'Coming soon',
-      onClick: () => setCurrentView('empty')
     }
   ];
 
@@ -237,7 +244,7 @@ const AdminPanel: React.FC = () => {
       {/* Footer */}
       <div className="mt-8 pt-6 border-t border-gray-200">
         <div className="flex items-center justify-between text-sm text-gray-500">
-          <span>Admin Panel v1.0</span>
+          <span>Admin Panel v2.0 - Database Integration</span>
           <span>Last updated: {new Date().toLocaleDateString()}</span>
         </div>
       </div>

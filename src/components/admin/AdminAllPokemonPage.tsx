@@ -30,13 +30,15 @@ const AdminAllPokemonPage: React.FC<AdminAllPokemonPageProps> = ({ onBack }) => 
   const [addingPokemon, setAddingPokemon] = useState<Set<number>>(new Set());
   const [loadingDetails, setLoadingDetails] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // Проверяем права администратора
   useEffect(() => {
     const checkAdminRights = async () => {
       try {
-        const isAdmin = await DatabaseService.checkAdminRights();
-        if (!isAdmin) {
+        const adminStatus = await DatabaseService.checkAdminRights();
+        setIsAdmin(adminStatus);
+        if (!adminStatus) {
           setError('У вас нет прав администратора для выполнения этих действий');
         }
       } catch (error) {
@@ -96,28 +98,40 @@ const AdminAllPokemonPage: React.FC<AdminAllPokemonPageProps> = ({ onBack }) => 
 
   // Добавление покемона в базу данных
   const handleAddPokemon = async (pokemon: PokemonWithStatus) => {
-    if (pokemon.inDatabase || addingPokemon.has(pokemon.id)) return;
+    if (!isAdmin) {
+      setError('У вас нет прав администратора');
+      return;
+    }
+
+    if (pokemon.inDatabase || addingPokemon.has(pokemon.id)) {
+      console.log('Pokemon already in database or being added');
+      return;
+    }
 
     console.log('Starting to add pokemon:', pokemon.name, pokemon.id);
-
-    // Загружаем детали если их нет
-    if (!pokemon.details) {
-      console.log('Loading pokemon details first...');
-      await loadPokemonDetails(pokemon);
-      // Получаем обновленные данные
-      const updatedPokemon = pokemonWithStatus.find(p => p.id === pokemon.id);
-      if (!updatedPokemon?.details) {
-        console.error('Failed to load pokemon details');
-        return;
-      }
-      pokemon = updatedPokemon;
-    }
+    setError(null); // Очищаем предыдущие ошибки
 
     setAddingPokemon(prev => new Set([...prev, pokemon.id]));
 
     try {
-      console.log('Adding pokemon to database:', pokemon.details);
-      await DatabaseService.addPokemonToDatabase(pokemon.details!);
+      // Загружаем детали если их нет
+      let pokemonDetails = pokemon.details;
+      if (!pokemonDetails) {
+        console.log('Loading pokemon details first...');
+        pokemonDetails = await PokemonService.getPokemonDetails(pokemon.name);
+        
+        // Обновляем локальное состояние с деталями
+        setPokemonWithStatus(prev =>
+          prev.map(p =>
+            p.id === pokemon.id
+              ? { ...p, details: pokemonDetails }
+              : p
+          )
+        );
+      }
+
+      console.log('Adding pokemon to database:', pokemonDetails);
+      await DatabaseService.addPokemonToDatabase(pokemonDetails);
       
       console.log('Pokemon added successfully, updating UI...');
       
@@ -135,9 +149,9 @@ const AdminAllPokemonPage: React.FC<AdminAllPokemonPageProps> = ({ onBack }) => 
       
       console.log('UI updated successfully');
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error adding pokemon to database:', error);
-      setError(`Ошибка добавления покемона ${pokemon.name}: ${error.message}`);
+      setError(`Ошибка добавления покемона ${pokemon.name}: ${error.message || 'Неизвестная ошибка'}`);
     } finally {
       setAddingPokemon(prev => {
         const newSet = new Set(prev);
@@ -149,6 +163,11 @@ const AdminAllPokemonPage: React.FC<AdminAllPokemonPageProps> = ({ onBack }) => 
 
   // Массовое добавление первых 100 покемонов
   const handleImportFirst100 = async () => {
+    if (!isAdmin) {
+      setError('У вас нет прав администратора');
+      return;
+    }
+
     if (!window.confirm('Вы уверены, что хотите импортировать первые 100 покемонов? Это может занять некоторое время.')) {
       return;
     }
@@ -189,9 +208,9 @@ const AdminAllPokemonPage: React.FC<AdminAllPokemonPageProps> = ({ onBack }) => 
       
       console.log('Import completed successfully');
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error importing first 100 pokemon:', error);
-      setError(`Ошибка импорта: ${error.message}`);
+      setError(`Ошибка импорта: ${error.message || 'Неизвестная ошибка'}`);
     } finally {
       setAddingPokemon(new Set());
     }
@@ -259,7 +278,7 @@ const AdminAllPokemonPage: React.FC<AdminAllPokemonPageProps> = ({ onBack }) => 
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start">
           <AlertCircle className="text-red-500 mr-3 mt-0.5" size={20} />
-          <div>
+          <div className="flex-1">
             <h4 className="text-red-800 font-medium">Ошибка</h4>
             <p className="text-red-700 text-sm mt-1">{error}</p>
             <button
@@ -268,6 +287,19 @@ const AdminAllPokemonPage: React.FC<AdminAllPokemonPageProps> = ({ onBack }) => 
             >
               Закрыть
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Предупреждение о правах */}
+      {!isAdmin && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6 flex items-start">
+          <AlertCircle className="text-yellow-500 mr-3 mt-0.5" size={20} />
+          <div>
+            <h4 className="text-yellow-800 font-medium">Ограниченный доступ</h4>
+            <p className="text-yellow-700 text-sm mt-1">
+              У вас нет прав администратора. Вы можете просматривать покемонов, но не можете добавлять их в базу данных.
+            </p>
           </div>
         </div>
       )}
@@ -304,18 +336,20 @@ const AdminAllPokemonPage: React.FC<AdminAllPokemonPageProps> = ({ onBack }) => 
           </div>
 
           {/* Кнопка массового импорта */}
-          <button
-            onClick={handleImportFirst100}
-            disabled={addingPokemon.size > 0}
-            className="flex items-center px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {addingPokemon.size > 0 ? (
-              <Loader2 className="animate-spin mr-2" size={16} />
-            ) : (
-              <Plus size={16} className="mr-2" />
-            )}
-            Import First 100
-          </button>
+          {isAdmin && (
+            <button
+              onClick={handleImportFirst100}
+              disabled={addingPokemon.size > 0}
+              className="flex items-center px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {addingPokemon.size > 0 ? (
+                <Loader2 className="animate-spin mr-2" size={16} />
+              ) : (
+                <Plus size={16} className="mr-2" />
+              )}
+              Import First 100
+            </button>
+          )}
         </div>
       </div>
 
@@ -329,6 +363,7 @@ const AdminAllPokemonPage: React.FC<AdminAllPokemonPageProps> = ({ onBack }) => 
             onLoadDetails={() => loadPokemonDetails(pokemon)}
             isAdding={addingPokemon.has(pokemon.id)}
             isLoadingDetails={loadingDetails.has(pokemon.id)}
+            isAdmin={isAdmin}
           />
         ))}
       </div>
@@ -369,6 +404,7 @@ interface PokemonApiCardProps {
   onLoadDetails: () => void;
   isAdding: boolean;
   isLoadingDetails: boolean;
+  isAdmin: boolean;
 }
 
 const PokemonApiCard: React.FC<PokemonApiCardProps> = ({
@@ -376,7 +412,8 @@ const PokemonApiCard: React.FC<PokemonApiCardProps> = ({
   onAddToDatabase,
   onLoadDetails,
   isAdding,
-  isLoadingDetails
+  isLoadingDetails,
+  isAdmin
 }) => {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -462,14 +499,17 @@ const PokemonApiCard: React.FC<PokemonApiCardProps> = ({
       {/* Кнопка добавления */}
       <button
         onClick={onAddToDatabase}
-        disabled={pokemon.inDatabase || isAdding}
+        disabled={pokemon.inDatabase || isAdding || !isAdmin}
         className={`w-full flex items-center justify-center px-3 py-2 rounded text-sm transition-colors ${
           pokemon.inDatabase
             ? 'bg-green-100 text-green-700 cursor-not-allowed'
             : isAdding
             ? 'bg-blue-100 text-blue-700 cursor-not-allowed'
+            : !isAdmin
+            ? 'bg-gray-100 text-gray-500 cursor-not-allowed'
             : 'bg-blue-500 text-white hover:bg-blue-600'
         }`}
+        title={!isAdmin ? 'Требуются права администратора' : ''}
       >
         {isAdding ? (
           <>
@@ -480,6 +520,11 @@ const PokemonApiCard: React.FC<PokemonApiCardProps> = ({
           <>
             <Check size={14} className="mr-2" />
             In Database
+          </>
+        ) : !isAdmin ? (
+          <>
+            <Plus size={14} className="mr-2" />
+            No Access
           </>
         ) : (
           <>

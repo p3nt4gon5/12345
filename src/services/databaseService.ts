@@ -28,7 +28,7 @@ export class DatabaseService {
 
       if (error) {
         console.error('Supabase error:', error);
-        throw error;
+        throw new Error(`Database error: ${error.message}`);
       }
       return data || [];
     } catch (error) {
@@ -49,7 +49,7 @@ export class DatabaseService {
 
       if (error && error.code !== 'PGRST116') {
         console.error('Supabase error:', error);
-        throw error;
+        throw new Error(`Database error: ${error.message}`);
       }
       return !!data;
     } catch (error) {
@@ -68,7 +68,7 @@ export class DatabaseService {
 
       if (error) {
         console.error('Supabase error:', error);
-        throw error;
+        throw new Error(`Database error: ${error.message}`);
       }
       return data?.map(p => p.id) || [];
     } catch (error) {
@@ -81,6 +81,12 @@ export class DatabaseService {
   static async addPokemonToDatabase(pokemon: Pokemon): Promise<DatabasePokemon> {
     try {
       console.log('Adding pokemon to database:', pokemon.name, pokemon.id);
+      
+      // Проверяем права администратора
+      const isAdmin = await this.checkAdminRights();
+      if (!isAdmin) {
+        throw new Error('У вас нет прав администратора для выполнения этого действия');
+      }
       
       const pokemonData = {
         id: pokemon.id,
@@ -105,7 +111,15 @@ export class DatabaseService {
 
       if (error) {
         console.error('Supabase insert error:', error);
-        throw error;
+        
+        // Более детальная обработка ошибок
+        if (error.code === '23505') {
+          throw new Error(`Покемон ${pokemon.name} уже существует в базе данных`);
+        } else if (error.code === '42501') {
+          throw new Error('Недостаточно прав для добавления покемона');
+        } else {
+          throw new Error(`Ошибка базы данных: ${error.message}`);
+        }
       }
 
       console.log('Successfully added pokemon:', data);
@@ -119,6 +133,12 @@ export class DatabaseService {
   // Удалить покемона из базы данных (мягкое удаление)
   static async removePokemonFromDatabase(pokemonId: number): Promise<void> {
     try {
+      // Проверяем права администратора
+      const isAdmin = await this.checkAdminRights();
+      if (!isAdmin) {
+        throw new Error('У вас нет прав администратора для выполнения этого действия');
+      }
+
       const { error } = await supabase
         .from('external_pokemon')
         .update({ is_active: false })
@@ -126,7 +146,7 @@ export class DatabaseService {
 
       if (error) {
         console.error('Supabase error:', error);
-        throw error;
+        throw new Error(`Database error: ${error.message}`);
       }
     } catch (error) {
       console.error('Error removing pokemon from database:', error);
@@ -147,7 +167,7 @@ export class DatabaseService {
 
       if (error) {
         console.error('Supabase error:', error);
-        throw error;
+        throw new Error(`Database error: ${error.message}`);
       }
       return data || [];
     } catch (error) {
@@ -168,7 +188,7 @@ export class DatabaseService {
 
       if (error && error.code !== 'PGRST116') {
         console.error('Supabase error:', error);
-        throw error;
+        throw new Error(`Database error: ${error.message}`);
       }
       return data || null;
     } catch (error) {
@@ -181,6 +201,12 @@ export class DatabaseService {
   static async importPokemonBatch(pokemonList: Pokemon[]): Promise<void> {
     try {
       console.log('Importing pokemon batch:', pokemonList.length);
+      
+      // Проверяем права администратора
+      const isAdmin = await this.checkAdminRights();
+      if (!isAdmin) {
+        throw new Error('У вас нет прав администратора для выполнения этого действия');
+      }
       
       const pokemonData = pokemonList.map(pokemon => ({
         id: pokemon.id,
@@ -201,7 +227,7 @@ export class DatabaseService {
 
       if (error) {
         console.error('Supabase batch import error:', error);
-        throw error;
+        throw new Error(`Ошибка импорта: ${error.message}`);
       }
 
       console.log('Successfully imported pokemon batch');
@@ -215,7 +241,12 @@ export class DatabaseService {
   static async checkAdminRights(): Promise<boolean> {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return false;
+      if (!user) {
+        console.log('No authenticated user');
+        return false;
+      }
+
+      console.log('Checking admin rights for user:', user.id, user.email);
 
       const { data, error } = await supabase
         .from('profiles')
@@ -228,7 +259,10 @@ export class DatabaseService {
         return false;
       }
 
-      return data?.role === 'admin';
+      const isAdmin = data?.role === 'admin';
+      console.log('User role:', data?.role, 'Is admin:', isAdmin);
+      
+      return isAdmin;
     } catch (error) {
       console.error('Error checking admin rights:', error);
       return false;

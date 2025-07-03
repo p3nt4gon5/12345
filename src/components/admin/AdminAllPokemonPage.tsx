@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, Plus, Check, Loader2, Search, Filter } from 'lucide-react';
+import { ArrowLeft, Plus, Check, Loader2, Search, Filter, AlertCircle } from 'lucide-react';
 import { useApiPokemon, usePokemonBatch } from '../../hooks/useApiPokemon';
 import { usePokemonInDatabase } from '../../hooks/useDatabasePokemon';
 import { DatabaseService } from '../../services/databaseService';
@@ -21,7 +21,7 @@ interface PokemonWithStatus {
 
 const AdminAllPokemonPage: React.FC<AdminAllPokemonPageProps> = ({ onBack }) => {
   const { pokemon: apiPokemon, loading: apiLoading, hasMore, loadMore } = useApiPokemon(50);
-  const { isPokemonInDatabase, addPokemonId, loading: dbLoading } = usePokemonInDatabase();
+  const { isPokemonInDatabase, addPokemonId, loading: dbLoading, refetch: refetchDbStatus } = usePokemonInDatabase();
   const { fetchBatch } = usePokemonBatch();
   
   const [pokemonWithStatus, setPokemonWithStatus] = useState<PokemonWithStatus[]>([]);
@@ -29,6 +29,24 @@ const AdminAllPokemonPage: React.FC<AdminAllPokemonPageProps> = ({ onBack }) => 
   const [filterStatus, setFilterStatus] = useState<'all' | 'inDatabase' | 'notInDatabase'>('all');
   const [addingPokemon, setAddingPokemon] = useState<Set<number>>(new Set());
   const [loadingDetails, setLoadingDetails] = useState<Set<number>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+
+  // Проверяем права администратора
+  useEffect(() => {
+    const checkAdminRights = async () => {
+      try {
+        const isAdmin = await DatabaseService.checkAdminRights();
+        if (!isAdmin) {
+          setError('У вас нет прав администратора для выполнения этих действий');
+        }
+      } catch (error) {
+        console.error('Error checking admin rights:', error);
+        setError('Ошибка проверки прав доступа');
+      }
+    };
+
+    checkAdminRights();
+  }, []);
 
   // Обновляем статус покемонов при изменении данных
   useEffect(() => {
@@ -80,19 +98,28 @@ const AdminAllPokemonPage: React.FC<AdminAllPokemonPageProps> = ({ onBack }) => 
   const handleAddPokemon = async (pokemon: PokemonWithStatus) => {
     if (pokemon.inDatabase || addingPokemon.has(pokemon.id)) return;
 
+    console.log('Starting to add pokemon:', pokemon.name, pokemon.id);
+
     // Загружаем детали если их нет
     if (!pokemon.details) {
+      console.log('Loading pokemon details first...');
       await loadPokemonDetails(pokemon);
-      // Ждем обновления состояния
+      // Получаем обновленные данные
       const updatedPokemon = pokemonWithStatus.find(p => p.id === pokemon.id);
-      if (!updatedPokemon?.details) return;
+      if (!updatedPokemon?.details) {
+        console.error('Failed to load pokemon details');
+        return;
+      }
       pokemon = updatedPokemon;
     }
 
     setAddingPokemon(prev => new Set([...prev, pokemon.id]));
 
     try {
+      console.log('Adding pokemon to database:', pokemon.details);
       await DatabaseService.addPokemonToDatabase(pokemon.details!);
+      
+      console.log('Pokemon added successfully, updating UI...');
       
       // Обновляем статус в локальном состоянии
       setPokemonWithStatus(prev =>
@@ -106,8 +133,11 @@ const AdminAllPokemonPage: React.FC<AdminAllPokemonPageProps> = ({ onBack }) => 
       // Обновляем глобальное состояние
       addPokemonId(pokemon.id);
       
+      console.log('UI updated successfully');
+      
     } catch (error) {
       console.error('Error adding pokemon to database:', error);
+      setError(`Ошибка добавления покемона ${pokemon.name}: ${error.message}`);
     } finally {
       setAddingPokemon(prev => {
         const newSet = new Set(prev);
@@ -119,16 +149,27 @@ const AdminAllPokemonPage: React.FC<AdminAllPokemonPageProps> = ({ onBack }) => 
 
   // Массовое добавление первых 100 покемонов
   const handleImportFirst100 = async () => {
+    if (!window.confirm('Вы уверены, что хотите импортировать первые 100 покемонов? Это может занять некоторое время.')) {
+      return;
+    }
+
     try {
       setAddingPokemon(new Set([...Array(100)].map((_, i) => i + 1)));
+      setError(null);
+      
+      console.log('Starting import of first 100 pokemon...');
       
       // Загружаем первые 100 покемонов
       const first100Pokemon = await fetchBatch(
         [...Array(100)].map((_, i) => (i + 1).toString())
       );
       
+      console.log('Fetched pokemon from API:', first100Pokemon.length);
+      
       // Импортируем в базу данных
       await DatabaseService.importPokemonBatch(first100Pokemon);
+      
+      console.log('Imported to database successfully');
       
       // Обновляем локальное состояние
       const importedIds = first100Pokemon.map(p => p.id);
@@ -143,8 +184,14 @@ const AdminAllPokemonPage: React.FC<AdminAllPokemonPageProps> = ({ onBack }) => 
       // Обновляем глобальное состояние
       importedIds.forEach(id => addPokemonId(id));
       
+      // Обновляем статус из базы данных
+      await refetchDbStatus();
+      
+      console.log('Import completed successfully');
+      
     } catch (error) {
       console.error('Error importing first 100 pokemon:', error);
+      setError(`Ошибка импорта: ${error.message}`);
     } finally {
       setAddingPokemon(new Set());
     }
@@ -207,6 +254,23 @@ const AdminAllPokemonPage: React.FC<AdminAllPokemonPageProps> = ({ onBack }) => 
           Loaded: {pokemonWithStatus.length} | In Database: {pokemonWithStatus.filter(p => p.inDatabase).length}
         </div>
       </div>
+
+      {/* Сообщение об ошибке */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start">
+          <AlertCircle className="text-red-500 mr-3 mt-0.5" size={20} />
+          <div>
+            <h4 className="text-red-800 font-medium">Ошибка</h4>
+            <p className="text-red-700 text-sm mt-1">{error}</p>
+            <button
+              onClick={() => setError(null)}
+              className="text-red-600 hover:text-red-800 text-sm mt-2 underline"
+            >
+              Закрыть
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Панель управления */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">

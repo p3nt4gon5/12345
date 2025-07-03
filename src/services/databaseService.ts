@@ -26,7 +26,10 @@ export class DatabaseService {
         .eq('is_active', true)
         .order('id');
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error:', error);
+        throw error;
+      }
       return data || [];
     } catch (error) {
       console.error('Error fetching pokemon from database:', error);
@@ -42,9 +45,12 @@ export class DatabaseService {
         .select('id')
         .eq('id', pokemonId)
         .eq('is_active', true)
-        .single();
+        .maybeSingle();
 
-      if (error && error.code !== 'PGRST116') throw error;
+      if (error && error.code !== 'PGRST116') {
+        console.error('Supabase error:', error);
+        throw error;
+      }
       return !!data;
     } catch (error) {
       console.error('Error checking pokemon in database:', error);
@@ -60,7 +66,10 @@ export class DatabaseService {
         .select('id')
         .eq('is_active', true);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error:', error);
+        throw error;
+      }
       return data?.map(p => p.id) || [];
     } catch (error) {
       console.error('Error fetching pokemon IDs from database:', error);
@@ -71,6 +80,8 @@ export class DatabaseService {
   // Добавить покемона в базу данных
   static async addPokemonToDatabase(pokemon: Pokemon): Promise<DatabasePokemon> {
     try {
+      console.log('Adding pokemon to database:', pokemon.name, pokemon.id);
+      
       const pokemonData = {
         id: pokemon.id,
         name: pokemon.name,
@@ -84,13 +95,20 @@ export class DatabaseService {
         is_active: true
       };
 
+      console.log('Pokemon data to insert:', pokemonData);
+
       const { data, error } = await supabase
         .from('external_pokemon')
         .insert(pokemonData)
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase insert error:', error);
+        throw error;
+      }
+
+      console.log('Successfully added pokemon:', data);
       return data;
     } catch (error) {
       console.error('Error adding pokemon to database:', error);
@@ -106,7 +124,10 @@ export class DatabaseService {
         .update({ is_active: false })
         .eq('id', pokemonId);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error:', error);
+        throw error;
+      }
     } catch (error) {
       console.error('Error removing pokemon from database:', error);
       throw error;
@@ -124,7 +145,10 @@ export class DatabaseService {
         .order('id')
         .limit(20);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error:', error);
+        throw error;
+      }
       return data || [];
     } catch (error) {
       console.error('Error searching pokemon in database:', error);
@@ -140,9 +164,12 @@ export class DatabaseService {
         .select('*')
         .eq('id', id)
         .eq('is_active', true)
-        .single();
+        .maybeSingle();
 
-      if (error && error.code !== 'PGRST116') throw error;
+      if (error && error.code !== 'PGRST116') {
+        console.error('Supabase error:', error);
+        throw error;
+      }
       return data || null;
     } catch (error) {
       console.error('Error fetching pokemon by ID from database:', error);
@@ -153,6 +180,8 @@ export class DatabaseService {
   // Импорт покемонов в базу данных (для админов)
   static async importPokemonBatch(pokemonList: Pokemon[]): Promise<void> {
     try {
+      console.log('Importing pokemon batch:', pokemonList.length);
+      
       const pokemonData = pokemonList.map(pokemon => ({
         id: pokemon.id,
         name: pokemon.name,
@@ -170,10 +199,39 @@ export class DatabaseService {
         .from('external_pokemon')
         .upsert(pokemonData, { onConflict: 'id' });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase batch import error:', error);
+        throw error;
+      }
+
+      console.log('Successfully imported pokemon batch');
     } catch (error) {
       console.error('Error importing pokemon batch:', error);
       throw error;
+    }
+  }
+
+  // Проверить права администратора
+  static async checkAdminRights(): Promise<boolean> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return false;
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+
+      if (error) {
+        console.error('Error checking admin rights:', error);
+        return false;
+      }
+
+      return data?.role === 'admin';
+    } catch (error) {
+      console.error('Error checking admin rights:', error);
+      return false;
     }
   }
 }
